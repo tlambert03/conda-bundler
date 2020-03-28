@@ -7,7 +7,7 @@ import shutil
 import stat
 import sys
 from datetime import datetime
-from os import chmod, environ, lstat, makedirs, path, remove, symlink
+from os import chmod, environ, lstat, makedirs, path, remove, symlink, listdir
 from subprocess import run
 from time import time
 from typing import List
@@ -35,13 +35,16 @@ def safe_conda_base(buildpath: str) -> str:
 def install_conda(buildpath: str) -> str:
     global CONDA_BASE
     conda_dir = safe_conda_base(buildpath)
+    CONDA_BASE = conda_dir
 
     if not path.exists(conda_dir):
+        logging.info(f"Installing miniconda to {conda_dir}")
         miniconda_installer = path.join(buildpath, "miniconda_installer.sh")
         if not path.exists(miniconda_installer):
             urlretrieve(MINICONDA_URL, filename=miniconda_installer)
         run(["bash", f"{miniconda_installer}", "-b", "-p", f'"{conda_dir}"'])
-    CONDA_BASE = conda_dir
+    else:
+        logging.info(f"Using existing miniconda installation at {conda_dir}")
     return conda_dir
 
 
@@ -54,7 +57,7 @@ def conda_run(args: List[str], env_name: str = "base"):
         env_dir = path.join(CONDA_BASE, "envs", env_name)
         env["PATH"] = f"{path.join(env_dir, 'bin')}:{env['PATH']}"
         env_pkgs = glob.glob(env_dir + "/lib/python*/site-packages")[0]
-        env["PYTHONPATH"] = f"{env_pkgs}:{env['PYTHONPATH']}"
+        env["PYTHONPATH"] = f"{env_pkgs}"
     logging.debug(f"ENV_RUN: {' '.join(args)}")
     run(args, env=env)
 
@@ -63,26 +66,26 @@ def create_env(
     conda_base: str, app_name: str, pyversion: str = "3.8", pip_install: List[str] = []
 ) -> str:
     env_dir = path.join(conda_base, "envs", app_name)
-    if not path.exists(env_dir):
-        logging.info(f"Creating conda environment for app {app_name}")
-        conda_run(
-            [
-                "conda",
-                "create",
-                "-n",
-                app_name,
-                "-c",
-                "conda-forge",
-                "-y",
-                f"python={pyversion}",
-            ]
-        )
-    else:
-        logging.info(f"Found existing conda environment for app {app_name}")
+    if path.exists(env_dir):
+        logging.info(f"Deleting existing conda environment {app_name}")
+        shutil.rmtree(env_dir)
+    logging.info(f"Creating conda environment {app_name}")
+    conda_run(
+        [
+            "conda",
+            "create",
+            "-n",
+            app_name,
+            "-c",
+            "conda-forge",
+            "-y",
+            f"python={pyversion}",
+        ]
+    )
     if not pip_install:
         pip_install = [app_name]
     logging.info("Installing packages with pip")
-    conda_run(["pip", "install"] + pip_install, app_name)
+    conda_run(["pip", "install", "--ignore-installed"] + pip_install, app_name)
 
     # here is how you would install using conda
     #     logging.info("Installing packages with conda")
@@ -95,18 +98,18 @@ def bundle_conda_env(
     env_dir: str, app_path: str, include: List[str] = [], exclude: List[str] = [],
 ):
     app_resource_dir = path.join(app_path, "Contents", "Resources")
-    if include:
-        for item in include:
-            logging.info(f"Copying {path.join(env_dir, item)} to bundle")
+    if not include:
+        include = listdir(env_dir)
+    for item in include:
+        fullpath = path.join(env_dir, item)
+        dest = path.join(app_resource_dir, item)
+        logging.info(f"Copying {fullpath} to bundle")
+        if path.isdir(fullpath):
             shutil.copytree(
-                path.join(env_dir, item),
-                path.join(app_resource_dir, item),
-                symlinks=True,
+                fullpath, dest, symlinks=True,
             )
-    else:
-        # Copy everything
-        logging.info("Copying entire conda env to bundle")
-        shutil.copytree(env_dir, app_resource_dir, True)
+        else:
+            shutil.copy(fullpath, dest)
 
     for pattern in exclude:
         full_path = path.join(app_resource_dir, pattern)
@@ -162,6 +165,7 @@ def create_exe(app_path: str):
             fp.write(
                 "#!/usr/bin/env bash\n"
                 'script_dir=$(dirname "$(dirname "$0")")\n'
+                'export PATH=:"$script_dir/Resources/bin/":$PATH\n'
                 '"$script_dir/Resources/bin/python" '
                 '"$script_dir/Resources/bin/{}" $@'.format(app_name)
             )
@@ -189,7 +193,7 @@ def create_info_plist(
     template = template.replace("{{ app_author }}", app_author or app_name)
     template = template.replace("{{ app_icon }}", icon_name)
     template = template.replace("{{ app_version }}", version)
-    template = template.replace("{{ year }}", datetime.now().year)
+    template = template.replace("{{ year }}", str(datetime.now().year))
     template = template.replace(
         "{{ copyright }}", copyright or f"{app_name} contributors"
     )
@@ -321,6 +325,7 @@ if __name__ == "__main__":
         type=str,
         metavar="",
         default="3.8",
+        choices=["3.6", "3.7", "3.8"],
     )
     parser.add_argument(
         "--conda-include",
@@ -328,11 +333,11 @@ if __name__ == "__main__":
         type=str,
         metavar="",
         nargs="*",
-        default=["lib", "bin", "share", "ssl", "translations"],
+        default=[],
     )
     parser.add_argument(
         "--conda-exclude",
-        help="directories in conda environment to exclude when bundling",
+        help="glob patterns (from base conda environment) to exclude when bundling",
         type=str,
         metavar="",
         nargs="*",
