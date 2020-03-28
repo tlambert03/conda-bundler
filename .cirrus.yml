@@ -1,0 +1,11 @@
+container:
+  image: python:slim
+
+bundle_task: 
+  auto_cancellation: true
+  osx_instance:
+    image: catalina-base
+  bundle_script: python ./bundle_osx.py -y --pip-install git+https://github.com/napari/napari.git
+  napari_artifacts:
+    path: dist/napari.dmg
+    type: application/octet-stream
