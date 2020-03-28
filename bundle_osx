@@ -6,7 +6,7 @@ import logging
 import shutil
 import stat
 import sys
-from datetime.datetime import now
+from datetime import datetime
 from os import chmod, environ, lstat, makedirs, path, remove, symlink
 from subprocess import run
 from time import time
@@ -60,7 +60,7 @@ def conda_run(args: List[str], env_name: str = "base"):
 
 
 def create_env(
-    conda_base: str, app_name: str, pyversion: str = "3.8", use_pip: bool = True
+    conda_base: str, app_name: str, pyversion: str = "3.8", pip_install: List[str] = []
 ) -> str:
     env_dir = path.join(conda_base, "envs", app_name)
     if not path.exists(env_dir):
@@ -79,12 +79,14 @@ def create_env(
         )
     else:
         logging.info(f"Found existing conda environment for app {app_name}")
-    if use_pip:
-        logging.info("Installing packages with pip")
-        conda_run(["pip", "install", app_name], app_name)
-    else:
-        logging.info("Installing packages with conda")
-        conda_run(["conda", "install", "-n", app_name, "-y", app_name])
+    if not pip_install:
+        pip_install = [app_name]
+    logging.info("Installing packages with pip")
+    conda_run(["pip", "install"] + pip_install, app_name)
+
+    # here is how you would install using conda
+    #     logging.info("Installing packages with conda")
+    #     conda_run(["conda", "install", "-n", app_name, "-y", app_name])
 
     return env_dir
 
@@ -187,7 +189,7 @@ def create_info_plist(
     template = template.replace("{{ app_author }}", app_author or app_name)
     template = template.replace("{{ app_icon }}", icon_name)
     template = template.replace("{{ app_version }}", version)
-    template = template.replace("{{ year }}", now().year)
+    template = template.replace("{{ year }}", datetime.now().year)
     template = template.replace(
         "{{ copyright }}", copyright or f"{app_name} contributors"
     )
@@ -243,7 +245,7 @@ def main(args: argparse.Namespace) -> str:
     makedirs(args.buildpath, exist_ok=True)
     conda_base = install_conda(args.buildpath)
     # create a new environment and install app named args.name
-    env_dir = create_env(conda_base, args.name, args.py, args.pip)
+    env_dir = create_env(conda_base, args.name, args.py, args.pip_install)
     # move newly-created environment into dist/appname.app/Contents/Resources
     bundle_conda_env(env_dir, app_path, args.conda_include, args.conda_exclude)
     # put icon into dist/appname.app/Contents/Resources
@@ -251,7 +253,7 @@ def main(args: argparse.Namespace) -> str:
     # create Info.plist in dist/appname.app/Contents
     create_info_plist(app_path, args.name, icon_basename)
 
-    if args.dmg:
+    if not args.nodmg:
         make_dmg(app_path)
 
     logging.info(f"App created in {int(time() - start_t)} seconds")
@@ -315,7 +317,7 @@ if __name__ == "__main__":
     )
     parser.add_argument(
         "--py",
-        help="Python version to bundle. (default 3.7)",
+        help="Python version to bundle. (default 3.8)",
         type=str,
         metavar="",
         default="3.8",
@@ -337,14 +339,19 @@ if __name__ == "__main__":
         default=["bin/*-qt4*"],
     )
     parser.add_argument(
-        "-p",
-        "--pip",
-        help="Use pip to install packages. Uses conda by default",
-        action="store_true",
+        "--pip-install",
+        help=(
+            "Install these pip packages. Multiple arguments accepted\n"
+            "as would be passed to pip install. By default, will attempt\n"
+            "to `pip install name` using --name argument"
+        ),
+        nargs="*",
+        metavar="",
+        default=[],
     )
     parser.add_argument(
-        "--dmg",
-        help="Package app into .dmg file.  Default is false.",
+        "--nodmg",
+        help="Do not package app into .dmg file.  Default is true.",
         action="store_true",
     )
     parser.add_argument(
