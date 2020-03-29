@@ -420,9 +420,10 @@ def sign_app(target: str, cert_name: str = "-"):
     try:
         if cert_name == "-":
             logging.info(f"No code certificate supplied, using ad-hoc signature")
-        subprocess.check_call(
-            ["codesign", "--force", "--deep", "-s", cert_name, target]
-        )
+        if cert_name:
+            subprocess.check_call(
+                ["codesign", "--force", "--deep", "-s", cert_name, target]
+            )
         logging.info(f"Successfully signed {target}")
     except subprocess.CalledProcessError as e:
         logging.error(f"App code signing failed: {e}")
@@ -518,6 +519,12 @@ if __name__ == "__main__":
             shutil.rmtree(args.distpath, ignore_errors=True)
             print(f"Deleting buildpath folder: {args.buildpath}")
             shutil.rmtree(args.buildpath, ignore_errors=True)
+            sys.exit()
+
+    class MakeDMG(argparse.Action):
+        def __call__(self, parser, args, values, option_string=None):
+            logging.basicConfig(level=args.log_level)
+            make_dmg(values[0], keep_app=True)
             sys.exit()
 
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
@@ -628,12 +635,20 @@ if __name__ == "__main__":
         nargs=0,
         action=CleanAction,
     )
+    parser.add_argument(
+        "--make-dmg",
+        help="Bundle prebuilt .app into a DMG, then exit.",
+        action=MakeDMG,
+        type=str,
+        nargs=1
+    )
 
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
     kwargs = vars(args)
     kwargs.pop("log_level")
     kwargs.pop("clean")
+    kwargs.pop("make_dmg")
     icon = kwargs.pop("icon")
     kwargs["icon"] = icon.name if icon else None
     main(**kwargs)
