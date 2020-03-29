@@ -232,7 +232,7 @@ def create_info_plist(
     app_author: str = "",
     copyright: str = "",
 ):
-    plist_template = path.join(path.dirname(__file__), "Info.plist.template")
+    plist_template = path.join(path.dirname(__file__), "Info.template.plist")
     with open(plist_template, "r") as f:
         template = f.read()
     template = template.replace("{{ app_name }}", app_name)
