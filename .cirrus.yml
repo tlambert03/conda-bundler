@@ -6,7 +6,8 @@ bundle_task:
   osx_instance:
     image: catalina-base
   bundle_script:
-    - python3 --version
+    - mkdir build
+    - curl https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ./build/miniconda_installer.sh
     - python3 ./bundle_osx.py -y --pip-install git+https://github.com/napari/napari.git
   napari_artifacts:
     path: dist/napari.dmg
