@@ -7,8 +7,14 @@ bundle_task:
     image: catalina-base
   bundle_script:
     - mkdir build
+    # pre-downloading here due to
+    # ssl.SSLCertVerificationError: [SSL: CERTIFICATE_VERIFY_FAILED] certificate verify failed:
+    # unable to get local issuer certificate 
     - curl https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ./build/miniconda_installer.sh
     - python3 ./bundle_osx.py -y --pip-install git+https://github.com/napari/napari.git
   napari_artifacts:
     path: dist/napari.dmg
     type: application/octet-stream
+
+# most recent artifact available at:
+# https://api.cirrus-ci.com/v1/artifact/github/tlambert03/napari-bundler/napari/dist/napari.dmg

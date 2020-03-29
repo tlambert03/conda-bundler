@@ -31,7 +31,7 @@ def safe_conda_base(buildpath: str) -> str:
     str
         path to a location where conda can be installed
     """
-    buildpath = path.abspath(path.expanduser(args.buildpath))
+    buildpath = path.abspath(path.expanduser(buildpath))
     conda_dir = path.join(buildpath, "conda")
     if " " not in conda_dir:
         return conda_dir
@@ -89,7 +89,11 @@ def conda_run(args: List[str], env_name: str = "base"):
 
 
 def create_env(
-    conda_base: str, app_name: str, pyversion: str = "3.8", pip_install: List[str] = []
+    conda_base: str,
+    app_name: str,
+    pyversion: str = "3.8",
+    pip_install: List[str] = [],
+    confirm: bool = True,
 ) -> str:
     """Create a new conda environment in ``conda_base``/envs.
 
@@ -106,6 +110,9 @@ def create_env(
         Explicit list of packages to install, as would be passed to pip install.
         If provided, ``app_name`` will NOT be installed unless it is a member of this
         list.  by default []
+    confirm : bool, optional
+        Whether to confirm deletion of an existing environment at the target location,
+        by default True
 
     Returns
     -------
@@ -113,22 +120,30 @@ def create_env(
         The path to the newly created environment folder at ``conda/envs/app_name``
     """
     env_dir = path.join(conda_base, "envs", app_name)
-    if path.exists(env_dir):
-        logging.info(f"Deleting existing conda environment {app_name}")
-        shutil.rmtree(env_dir)
-    logging.info(f"Creating conda environment {app_name}")
-    conda_run(
-        [
-            "conda",
-            "create",
-            "-n",
-            app_name,
-            "-c",
-            "conda-forge",
-            "-y",
-            f"python={pyversion}",
-        ]
-    )
+    if (
+        path.exists(env_dir)
+        and confirm
+        and not get_confirmation("Environment already exists, overwrite?")
+    ):
+        logging.info(f"Using existing conda environment: {env_dir}")
+    else:
+        if path.exists(env_dir):
+            logging.info(f"Deleting existing conda environment: {env_dir}")
+            shutil.rmtree(env_dir)
+        logging.info(f"Creating conda environment: {env_dir}")
+        conda_run(
+            [
+                "conda",
+                "create",
+                "-n",
+                app_name,
+                "-c",
+                "conda-forge",
+                "-y",
+                f"python={pyversion}",
+            ]
+        )
+
     if not pip_install:
         pip_install = [app_name]
     logging.info("Installing packages with pip")
@@ -166,6 +181,8 @@ def bundle_conda_env(
     for item in include:
         fullpath = path.join(env_dir, item)
         dest = path.join(app_resource_dir, item)
+        if path.exists(dest):
+            shutil.rmtree(dest)
         logging.info(f"Copying {fullpath} to bundle")
         if path.isdir(fullpath):
             shutil.copytree(
@@ -220,7 +237,7 @@ def create_app_folder(name: str, distpath: str, confirm: bool = True) -> str:
         The full path to the newly created app folder: ``distpath/name.app``
     """
     app_name = f"{name}.app"
-    distpath = path.abspath(path.expanduser(args.distpath))
+    distpath = path.abspath(path.expanduser(distpath))
     app_path = path.join(distpath, app_name)
     # Check if app already exists and ask user what to do if so.
     if path.exists(app_path):
@@ -293,7 +310,7 @@ def create_info_plist(
         app_name = path.basename(app_path).rstrip(".app")
 
     if icon_name:
-        icon_path = path.join(app_name, "Contents", "Resources", icon_name)
+        icon_path = path.join(app_path, "Contents", "Resources", icon_name)
         if not path.exists(icon_path):
             logging.warning(
                 f"No icon file found at {icon_path} when creating Info.plist"
@@ -340,18 +357,18 @@ def create_exe(app_path: str, pyscript: str = ""):
     exe_path = path.join(app_path, "Contents", "MacOS", app_name)
     if not pyscript:
         pyscript = f"Resources/bin/{app_name}"
-    if not path.exists(path.join(app_path, pyscript)):
+    if not path.exists(path.join(app_path, "Contents", pyscript)):
         logging.error(
-            f"No python script found at {path.join(app_path, pyscript)}.  "
+            f"No python script found at {path.join(app_path, 'Contents', pyscript)}. "
             "This app may not run properly"
         )
     with open(exe_path, "w") as fp:
         try:
             fp.write(
                 "#!/usr/bin/env bash\n"
-                'app_dir=$(dirname "$(dirname "$0")")\n'
-                'export PATH=:"$app_dir/Resources/bin/":$PATH\n'
-                f'"$app_dir/Resources/bin/python" "$app_dir/{pyscript}" $@'
+                'contents_dir=$(dirname "$(dirname "$0")")\n'
+                'export PATH=:"$contents_dir/Resources/bin/":$PATH\n'
+                f'"$contents_dir/Resources/bin/python" "$contents_dir/{pyscript}" $@'
             )
         except IOError:
             logging.critical(f"Could not create Contents/MacOS/{app_name} script")
@@ -422,7 +439,7 @@ def main(
     buildpath : str, optional
         Directory to put build resources, by default "./build"
     noconfirm : bool, optional
-        Replace existing app directory without asking for confirmation, by default False
+        Replace existing directories without asking for confirmation, by default False
     py : str, optional
         The python version to bundle, by default "3.8", by default "3.8"
     pip_install : list of str, optional
@@ -435,8 +452,7 @@ def main(
         glob patterns (relative to the base conda environment) to exclude when bundling,
         by default []
     icon : str, optional
-        Path to an .icns file to use for this app, by default, will look for a file
-        named ``icon.icns`` in the same directory as this script.
+        Path to an .icns file to use for this app.  By default, no icon will be used.
     nodmg : bool, optional
         Whether to skip putting the new app into a dmg file, by default a dmg WILL be
         created at ``distpath/name.dmg``
@@ -450,14 +466,14 @@ def main(
     makedirs(buildpath, exist_ok=True)
     conda_base = install_conda(buildpath)
     # create a new environment and install app named name
-    env_dir = create_env(conda_base, name, py, pip_install)
+    env_dir = create_env(conda_base, name, py, pip_install, not noconfirm)
     # move newly-created environment into dist/appname.app/Contents/Resources
     bundle_conda_env(env_dir, app_path, conda_include, conda_exclude)
     # put icon into dist/appname.app/Contents/Resources
-    icon_path = path.abspath(path.expanduser(icon))
-    if not icon_path:
-        icon_path = path.join(path.dirname(__file__), "icon.icns")
-    icon_basename = copy_icon(app_path, icon_path)
+    if icon:
+        icon_basename = copy_icon(app_path, path.abspath(path.expanduser(icon)))
+    else:
+        icon_basename = ""
     # create Info.plist in dist/appname.app/Contents
     create_info_plist(app_path, name, icon_basename)
     # create dist/appname.app/Contents/MacOS/appname script
@@ -472,32 +488,40 @@ def main(
 
 if __name__ == "__main__":
 
+    class CleanAction(argparse.Action):
+        def __call__(self, parser, args, values, option_string=None):
+            conda_base = safe_conda_base(args.buildpath)
+            print(f"Deleting (local) conda installation: {conda_base}")
+            shutil.rmtree(conda_base, ignore_errors=True)
+            print(f"Deleting distpath folder: {args.distpath}")
+            shutil.rmtree(args.distpath, ignore_errors=True)
+            print(f"Deleting buildpath folder: {args.buildpath}")
+            shutil.rmtree(args.buildpath, ignore_errors=True)
+            sys.exit()
+
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
 
     parser.add_argument(
         "-y",
         "--noconfirm",
-        help="Replace output directory without asking for confirmation",
+        help="Replace existing app and resources without asking for confirmation",
         action="store_true",
     )
     parser.add_argument(
-        "-n",
-        "--name",
-        help="Name of pip-installable app to bundle. (defaul `napari`)",
+        "name",
+        help=(
+            "Name of app to bundle. If '--pip-install' is not specified,\n"
+            "this name is also assumed to be a pip-installable package."
+        ),
         type=str,
-        metavar="",
-        default="napari",
+        metavar="app_name",
     )
     parser.add_argument(
         "-i",
         "--icon",
-        help=(
-            "Icon file (in icns format) for the bundle."
-            "\nBy default, looks for 'icon.icns' in same directory"
-        ),
+        help=("Icon file (in .icns format) for the bundle."),
         metavar="",
-        default="",
-        type=str,
+        type=argparse.FileType("r"),
     )
     parser.add_argument(
         "--distpath",
@@ -514,24 +538,30 @@ if __name__ == "__main__":
         default="./build",
     )
     parser.add_argument(
-        "--log-level",
-        help=(
-            "Amount of detail in build-time console messages."
-            "\nmay be one of TRACE, DEBUG, INFO, WARN,"
-            "ERROR, CRITICAL\n(default: INFO)"
-        ),
-        type=str,
-        metavar="",
-        default="INFO",
-        choices=["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"],
-    )
-    parser.add_argument(
         "--py",
         help="Python version to bundle. (default 3.8)",
         type=str,
         metavar="",
         default="3.8",
         choices=["3.6", "3.7", "3.8"],
+    )
+    parser.add_argument(
+        "--nodmg",
+        help="Do not package app into .dmg file.  By default a DMG will be created",
+        action="store_true",
+    )
+    parser.add_argument(
+        "--pip-install",
+        help=(
+            "Install these pip packages. Multiple arguments accepted\n"
+            "as would be passed to pip install. If not provided, will\n"
+            "attempt to `pip install <app_name>` using `app_name` argument.\n"
+            "If '--pip-install' IS provided, then 'app_name' will NOT be\n"
+            "installed unless explicitly included in this list."
+        ),
+        nargs="*",
+        metavar="",
+        default=[],
     )
     parser.add_argument(
         "--conda-include",
@@ -550,39 +580,29 @@ if __name__ == "__main__":
         default=["bin/*-qt4*"],
     )
     parser.add_argument(
-        "--pip-install",
+        "--log-level",
         help=(
-            "Install these pip packages. Multiple arguments accepted\n"
-            "as would be passed to pip install. By default, will attempt\n"
-            "to `pip install name` using --name argument"
+            "Amount of detail in build-time console messages."
+            "\nmay be one of TRACE, DEBUG, INFO, WARN,"
+            "ERROR, CRITICAL\n(default: WARN)"
         ),
-        nargs="*",
+        type=str,
         metavar="",
-        default=[],
-    )
-    parser.add_argument(
-        "--nodmg",
-        help="Do not package app into .dmg file.  Default is true.",
-        action="store_true",
+        default="WARN",
+        choices=["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"],
     )
     parser.add_argument(
         "--clean",
-        help="Delete all folders created by this bundler.",
-        action="store_true",
+        help="Delete all folders created by this bundler and exit.",
+        nargs=0,
+        action=CleanAction,
     )
 
     args = parser.parse_args()
     logging.basicConfig(level=args.log_level)
-
-    if args.clean:
-        logging.info("Deleting (local) conda installation")
-        shutil.rmtree(safe_conda_base(args.buildpath), ignore_errors=True)
-        logging.info("Deleting distpath folder")
-        shutil.rmtree(args.distpath, ignore_errors=True)
-        logging.info("Deleting buildpath folder")
-        shutil.rmtree(args.buildpath, ignore_errors=True)
-    else:
-        kwargs = vars(args)
-        kwargs.pop("log_level")
-        kwargs.pop("clean")
-        main(**kwargs)
+    kwargs = vars(args)
+    kwargs.pop("log_level")
+    kwargs.pop("clean")
+    icon = kwargs.pop("icon")
+    kwargs["icon"] = icon.name if icon else None
+    main(**kwargs)
