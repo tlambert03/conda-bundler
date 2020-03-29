@@ -91,23 +91,26 @@ def conda_run(args: List[str], env_name: str = "base"):
 def create_env(
     conda_base: str, app_name: str, pyversion: str = "3.8", pip_install: List[str] = []
 ) -> str:
-    """Create a new conda environment in ``conda_base``/envs. 
+    """Create a new conda environment in ``conda_base``/envs.
 
     Parameters
     ----------
     conda_base : str
         Directory of conda installation to use
     app_name : str
-        [description]
+        Name of app.  This will be used as the name of the environment, *and* if the
+        ``pip_install`` list is empty, will be installed as a package.
     pyversion : str, optional
-        [description], by default "3.8"
+        The python version to bundle, by default "3.8"
     pip_install : List[str], optional
-        [description], by default []
-    
+        Explicit list of packages to install, as would be passed to pip install.
+        If provided, ``app_name`` will NOT be installed unless it is a member of this
+        list.  by default []
+
     Returns
     -------
-    str
-        [description]
+    env_dir : str
+        The path to the newly created environment folder at ``conda/envs/app_name``
     """
     env_dir = path.join(conda_base, "envs", app_name)
     if path.exists(env_dir):
@@ -143,6 +146,20 @@ def create_env(
 def bundle_conda_env(
     env_dir: str, app_path: str, include: List[str] = [], exclude: List[str] = [],
 ):
+    """Copy the conda env at ``env_dir`` into the .app at ``app_path``
+
+    Parameters
+    ----------
+    env_dir : str
+        The source path to the conda environment to copy.
+    app_path : str
+        The destination path to the app_name.app bundle that is being packaged.
+    include : list of str, optional
+        directories in conda environment to include when bundling, by default []
+    exclude : list of str, optional
+        glob patterns (relative to the base conda environment) to exclude when bundling,
+        by default []
+    """
     app_resource_dir = path.join(app_path, "Contents", "Resources")
     if not include:
         include = listdir(env_dir)
@@ -174,6 +191,7 @@ def bundle_conda_env(
 
 
 def get_confirmation(question: str, default_yes: bool = True) -> bool:
+    """Retrieve y/n answer from user, with default."""
     question = question + (" ([y]/n): " if default_yes else " (y/[n]): ")
     resp = input(question)
     while resp not in ["y", "n", ""]:
@@ -184,7 +202,23 @@ def get_confirmation(question: str, default_yes: bool = True) -> bool:
 
 
 def create_app_folder(name: str, distpath: str, confirm: bool = True) -> str:
-    """ Create an app bundle """
+    """Create the (empty) structure of a MacOSX app directory.
+
+    Parameters
+    ----------
+    name : str
+        The name of the application.
+    distpath : str
+        The directory in which to create the app
+    confirm : bool, optional
+        Whether to confirm deletion of an existing app at the target location,
+        by default True
+
+    Returns
+    -------
+    app_path : str
+        The full path to the newly created app folder: ``distpath/name.app``
+    """
     app_name = f"{name}.app"
     distpath = path.abspath(path.expanduser(args.distpath))
     app_path = path.join(distpath, app_name)
@@ -201,40 +235,74 @@ def create_app_folder(name: str, distpath: str, confirm: bool = True) -> str:
     return app_path
 
 
-def create_exe(app_path: str):
-    """ Create runnable script in bundle.app/Contents/MacOS"""
-    app_name = path.basename(app_path).strip(".app")
-    exe_path = path.join(app_path, "Contents", "MacOS", app_name)
+def copy_icon(app_path: str, icon_path: str) -> str:
+    """Copy icon into app_path/Contents/Resources.
 
-    with open(exe_path, "w") as fp:
-        try:
-            fp.write(
-                "#!/usr/bin/env bash\n"
-                'script_dir=$(dirname "$(dirname "$0")")\n'
-                'export PATH=:"$script_dir/Resources/bin/":$PATH\n'
-                '"$script_dir/Resources/bin/python" '
-                '"$script_dir/Resources/bin/{}" $@'.format(app_name)
-            )
-        except IOError:
-            logging.error(f"Could not create Contents/MacOS/{app_name} script")
-            sys.exit(1)
+    Parameters
+    ----------
+    app_path : str
+        path to mac .app directory being bundled.
+    icon_path : str, optional
+        path to icon file to include in bundle.
 
-    # Set execution flags
-    current_permissions = stat.S_IMODE(lstat(exe_path).st_mode)
-    chmod(exe_path, current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    Returns
+    -------
+    icon_basename : str
+        the basename of the icon included in Contents/Resources.  This can be passed as
+        the ``icon_name`` argument in ``create_info_plist``.
+    """
+    if path.isfile(icon_path):
+        logging.info(f"Copying icon from {icon_path} to bundle")
+        icon_basename = path.basename(icon_path)
+        shutil.copy(
+            icon_path, path.join(app_path, "Contents", "Resources", icon_basename)
+        )
+    else:
+        logging.warning(f"Could not find icon at {icon_path}")
+        icon_basename = ""
+    return icon_basename
 
 
 def create_info_plist(
     app_path: str,
-    app_name: str,
+    app_name: str = "",
     icon_name: str = "",
     version: str = "0.1.0",
     app_author: str = "",
     copyright: str = "",
 ):
+    """Create an Info.plist file and copy it to the /Contents folder of app_path.
+
+    Parameters
+    ----------
+    app_path : str
+        The path to the app_name.app bundle that is being packaged.
+    app_name : str, optional
+        The name that will be given to the app in the Info.plist file. by default, will
+        use the basename of the app: ``app_path.rstrip(".app")``
+    icon_name : str, optional
+        Name of icon file.  File must be located in app_path, by default "" (no icon)
+    version : str, optional
+        Version string of the app being bundled, by default "0.1.0"
+    app_author : str, optional
+        App author to use in CFBundleIdentifier, by default will use ``app_name``.
+    copyright : str, optional
+        String to use for copyright attribution, by default ``{app_name} contributors``
+    """
+    if not app_name:
+        app_name = path.basename(app_path).rstrip(".app")
+
+    if icon_name:
+        icon_path = path.join(app_name, "Contents", "Resources", icon_name)
+        if not path.exists(icon_path):
+            logging.warning(
+                f"No icon file found at {icon_path} when creating Info.plist"
+            )
+
     plist_template = path.join(path.dirname(__file__), "Info.template.plist")
     with open(plist_template, "r") as f:
         template = f.read()
+
     template = template.replace("{{ app_name }}", app_name)
     template = template.replace("{{ app_author }}", app_author or app_name)
     template = template.replace("{{ app_icon }}", icon_name)
@@ -243,25 +311,70 @@ def create_info_plist(
     template = template.replace(
         "{{ copyright }}", copyright or f"{app_name} contributors"
     )
+
     with open(path.join(app_path, "Contents", "Info.plist"), "w") as f:
+        logging.info("Writing Info.plist")
         f.write(template)
 
 
-def copy_icon(icon: str, app_path: str) -> str:
-    if not icon:
-        icon = path.join(path.dirname(__file__), "icon.icns")
-    icon = path.abspath(path.expanduser(args.icon))
-    if path.isfile(icon):
-        logging.info(f"Copying icon from {icon} to bundle")
-        icon_basename = path.basename(icon)
-        shutil.copy(icon, path.join(app_path, "Contents", "Resources", icon_basename))
-    else:
-        logging.warning(f"Could not find icon at {icon}")
-        icon_basename = ""
-    return icon_basename
+def create_exe(app_path: str, pyscript: str = ""):
+    """Create runnable script in bundle.app/Contents/MacOS.
+
+    This will create an executable bash script at ``app_path/Contents/MacOS/app_name``.
+    The script will add ``app_path/Contents/Resources/bin`` to the environment PATH, and
+    then execute a python script located at ``pyscript``, or, if pyscript is not
+    provided, at ``Resources/bin/{app_name}``.
+
+    Parameters
+    ----------
+    app_path : str
+        Path to a mac .app bundle
+    pyscript : str, optional.
+        Path (relative to app_path) of a python script (i.e. "the real app") that should
+        be run when the app is started.  By default, will point to a script at
+        ``Resources/bin/{app_name}``.  (Assuming the package being installed has a
+        ``console_scripts`` entry point in its setup.py file, setuptools will have
+        created an executable script in the environment's ``/bin`` folder.)
+    """
+    app_name = path.basename(app_path).strip(".app")
+    exe_path = path.join(app_path, "Contents", "MacOS", app_name)
+    if not pyscript:
+        pyscript = f"Resources/bin/{app_name}"
+    if not path.exists(path.join(app_path, pyscript)):
+        logging.error(
+            f"No python script found at {path.join(app_path, pyscript)}.  "
+            "This app may not run properly"
+        )
+    with open(exe_path, "w") as fp:
+        try:
+            fp.write(
+                "#!/usr/bin/env bash\n"
+                'app_dir=$(dirname "$(dirname "$0")")\n'
+                'export PATH=:"$app_dir/Resources/bin/":$PATH\n'
+                f'"$app_dir/Resources/bin/python" "$app_dir/{pyscript}" $@'
+            )
+        except IOError:
+            logging.critical(f"Could not create Contents/MacOS/{app_name} script")
+            sys.exit(1)
+
+    # Set execution flags
+    current_permissions = stat.S_IMODE(lstat(exe_path).st_mode)
+    chmod(exe_path, current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
 def make_dmg(app_path: str, keep_app: bool = False):
+    """Bundle app at ``app_path`` into a .dmg file for distribution.
+
+    Will also include a symlink to ``/Applications``.
+
+    Parameters
+    ----------
+    app_path : str
+        path to mac .app directory being bundled.
+    keep_app : bool, optional
+        Whether to keep an unbundled copy of the app, outside of the .dmg file, or not.
+        by default False
+    """
     dmg_dir = path.join(path.dirname(app_path), "dmg")
     dmg_file = app_path.replace(".app", ".dmg")
     makedirs(dmg_dir, exist_ok=True)
@@ -283,31 +396,78 @@ def make_dmg(app_path: str, keep_app: bool = False):
         logging.error(f"DMG creation failed: {result.stderr.decode().strip()}")
 
 
-def main(args: argparse.Namespace) -> str:
-    logging.info(f'Creating "{args.name}.app"')
+def main(
+    name: str,
+    distpath: str = "./dist",
+    buildpath: str = "./build",
+    noconfirm: bool = False,
+    py: str = "3.8",
+    pip_install: List[str] = [],
+    conda_include: List[str] = [],
+    conda_exclude: List[str] = [],
+    icon: str = "",
+    nodmg: bool = False,
+):
+    """Main program to bundle a conda env into a mac app.
+
+    Will create an DMG-packaged app at ``distpath/name.dmg`` unless ``nodmg`` is
+    ``True``, in which case will create an app at ``distpath/name.app``
+
+    Parameters
+    ----------
+    name : str
+        Name of the app being bundled
+    distpath : str, optional
+        Destination directory for the app, by default "./dist"
+    buildpath : str, optional
+        Directory to put build resources, by default "./build"
+    noconfirm : bool, optional
+        Replace existing app directory without asking for confirmation, by default False
+    py : str, optional
+        The python version to bundle, by default "3.8", by default "3.8"
+    pip_install : list of str, optional
+        Explicit list of packages to install, as would be passed to pip install.
+        If provided, ``name`` will NOT be installed unless it is a member of this
+        list.  by default pip will try to install a package named ``name``.
+    conda_include : list of str, optional
+        directories in conda environment to include when bundling, by default []
+    conda_exclude : list of str, optional
+        glob patterns (relative to the base conda environment) to exclude when bundling,
+        by default []
+    icon : str, optional
+        Path to an .icns file to use for this app, by default, will look for a file
+        named ``icon.icns`` in the same directory as this script.
+    nodmg : bool, optional
+        Whether to skip putting the new app into a dmg file, by default a dmg WILL be
+        created at ``distpath/name.dmg``
+    """
+    logging.info(f'Creating "{name}.app"')
     start_t = time()
 
     # create dist/appname.app/ and all subdirectories
-    app_path = create_app_folder(args.name, args.distpath, not args.noconfirm)
+    app_path = create_app_folder(name, distpath, not noconfirm)
+    # download and install miniconda into buildpath
+    makedirs(buildpath, exist_ok=True)
+    conda_base = install_conda(buildpath)
+    # create a new environment and install app named name
+    env_dir = create_env(conda_base, name, py, pip_install)
+    # move newly-created environment into dist/appname.app/Contents/Resources
+    bundle_conda_env(env_dir, app_path, conda_include, conda_exclude)
+    # put icon into dist/appname.app/Contents/Resources
+    icon_path = path.abspath(path.expanduser(icon))
+    if not icon_path:
+        icon_path = path.join(path.dirname(__file__), "icon.icns")
+    icon_basename = copy_icon(app_path, icon_path)
+    # create Info.plist in dist/appname.app/Contents
+    create_info_plist(app_path, name, icon_basename)
     # create dist/appname.app/Contents/MacOS/appname script
     create_exe(app_path)
-    # download and install miniconda into buildpath
-    makedirs(args.buildpath, exist_ok=True)
-    conda_base = install_conda(args.buildpath)
-    # create a new environment and install app named args.name
-    env_dir = create_env(conda_base, args.name, args.py, args.pip_install)
-    # move newly-created environment into dist/appname.app/Contents/Resources
-    bundle_conda_env(env_dir, app_path, args.conda_include, args.conda_exclude)
-    # put icon into dist/appname.app/Contents/Resources
-    icon_basename = copy_icon(args.icon, app_path)
-    # create Info.plist in dist/appname.app/Contents
-    create_info_plist(app_path, args.name, icon_basename)
 
-    if not args.nodmg:
+    # bundle into a dmg
+    if not nodmg:
         make_dmg(app_path)
 
     logging.info(f"App created in {int(time() - start_t)} seconds")
-    return app_path
 
 
 if __name__ == "__main__":
@@ -422,4 +582,7 @@ if __name__ == "__main__":
         logging.info("Deleting buildpath folder")
         shutil.rmtree(args.buildpath, ignore_errors=True)
     else:
-        main(args)
+        kwargs = vars(args)
+        kwargs.pop("log_level")
+        kwargs.pop("clean")
+        main(**kwargs)
