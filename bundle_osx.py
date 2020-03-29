@@ -145,6 +145,7 @@ def create_env(
         )
 
     if not pip_install:
+        logging.info(f"No pip packages specified... trying `pip install {app_name}`")
         pip_install = [app_name]
     logging.info("Installing packages with pip")
     # ignore-installed is important otherwise deps that are in the base environment
