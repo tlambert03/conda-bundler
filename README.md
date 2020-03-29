@@ -12,10 +12,11 @@ on github](https://github.com/dschreij/anaconda-env-to-osx-app).
 
 The main difference between this package and
 [Daniel's](https://github.com/dschreij/anaconda-env-to-osx-app) is that this one
-has no project-specific code in it.  It has been generalized so that it can
-bundle any package(s) that can be pip installed.  For instance, the following
-will create a bundled version of [napari](https://github.com/napari/napari), a
-fast n-dimensional image viewer:
+has no project-specific code in it and does not depend on `biplist` or
+`dmgbuild`.  It has been generalized so that it can bundle any package(s) that
+can be pip installed.  For instance, the following will create a bundled version
+of [napari](https://github.com/napari/napari), a fast n-dimensional image
+viewer:
 
 ```bash
 python bundle_osx.py napari
@@ -91,8 +92,8 @@ python bundle_osx.py napari --pip-install numpy scipy matplotlib
 
 ### Help
 
-```shell
-$ python bundle_osx.py
+```
+$ python bundle_osx.py --help
 
 usage: bundle_osx.py [-h] [-y] [-i] [--distpath] [--buildpath] [--py] [--nodmg]
     [--pip-install [[...]]] [--conda-include [[...]]] [--conda-exclude [[...]]]
