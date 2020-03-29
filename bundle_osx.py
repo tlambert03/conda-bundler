@@ -503,10 +503,7 @@ def main(
 
     # bundle into a dmg
     if not nodmg:
-        dmg_file = make_dmg(app_path)
-        if dmg_file and cert_name:
-            sign_app(dmg_file, cert_name)
-
+        make_dmg(app_path)
     logging.info(f"App created in {int(time() - start_t)} seconds")
 
 
