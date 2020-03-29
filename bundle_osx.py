@@ -18,6 +18,19 @@ CONDA_BASE = ""
 
 
 def safe_conda_base(buildpath: str) -> str:
+    """Return path to a 'safe' location (no spaces) for the base conda install.
+
+    Parameters
+    ----------
+    buildpath : str
+        The buildpath for the current bundle.  Will prefer putting stuff into the build
+        path, unless there are spaces... in which case it will go in ``~/_temp_conda``
+
+    Returns
+    -------
+    str
+        path to a location where conda can be installed
+    """
     buildpath = path.abspath(path.expanduser(args.buildpath))
     conda_dir = path.join(buildpath, "conda")
     if " " not in conda_dir:
@@ -49,15 +62,28 @@ def install_conda(buildpath: str) -> str:
 
 
 def conda_run(args: List[str], env_name: str = "base"):
+    """Run a command from the conda base (or ``env_name``).
+
+    This function puts the corresponding conda environment binaries and site-packages
+    at the front of the PATH and PYTHONPATH environmental variables before running the
+    command.
+
+    Parameters
+    ----------
+    args : List[str]
+        standard command string as would be provided to subprocess.run
+    env_name : str, optional
+        Optional name of a conda environment in which to run command, by default "base"
+    """
     assert path.isdir(CONDA_BASE), f"Could not find conda environment at {CONDA_BASE}"
     env = environ.copy()
     env["PATH"] = f"{path.join(CONDA_BASE, 'bin')}:{environ.get('PATH')}"
-    env["PYTHONPATH"] = glob.glob(CONDA_BASE + "/lib/python*/site-packages")[0]
+    env["PYTHONPATH"] = ":".join(glob.glob(CONDA_BASE + "/lib/python*/site-packages"))
     if env_name != "base":
         env_dir = path.join(CONDA_BASE, "envs", env_name)
         env["PATH"] = f"{path.join(env_dir, 'bin')}:{env['PATH']}"
-        env_pkgs = glob.glob(env_dir + "/lib/python*/site-packages")[0]
-        env["PYTHONPATH"] = f"{env_pkgs}"
+        env_pkgs = glob.glob(env_dir + "/lib/python*/site-packages")
+        env["PYTHONPATH"] = ":".join(env_pkgs)
     logging.debug(f"ENV_RUN: {' '.join(args)}")
     run(args, env=env)
 
@@ -65,6 +91,24 @@ def conda_run(args: List[str], env_name: str = "base"):
 def create_env(
     conda_base: str, app_name: str, pyversion: str = "3.8", pip_install: List[str] = []
 ) -> str:
+    """Create a new conda environment in ``conda_base``/envs. 
+
+    Parameters
+    ----------
+    conda_base : str
+        Directory of conda installation to use
+    app_name : str
+        [description]
+    pyversion : str, optional
+        [description], by default "3.8"
+    pip_install : List[str], optional
+        [description], by default []
+    
+    Returns
+    -------
+    str
+        [description]
+    """
     env_dir = path.join(conda_base, "envs", app_name)
     if path.exists(env_dir):
         logging.info(f"Deleting existing conda environment {app_name}")
@@ -85,11 +129,13 @@ def create_env(
     if not pip_install:
         pip_install = [app_name]
     logging.info("Installing packages with pip")
+    # ignore-installed is important otherwise deps that are in the base environment
+    # may not make it into the bundle
     conda_run(["pip", "install", "--ignore-installed"] + pip_install, app_name)
 
-    # here is how you would install using conda
-    #     logging.info("Installing packages with conda")
-    #     conda_run(["conda", "install", "-n", app_name, "-y", app_name])
+    # # here is how you would install using conda
+    # logging.info("Installing packages with conda")
+    # conda_run(["conda", "install", "-n", app_name, "-y", app_name])
 
     return env_dir
 
