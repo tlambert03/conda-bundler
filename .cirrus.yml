@@ -12,7 +12,7 @@ bundle_task:
     # unable to get local issuer certificate
     - curl https://repo.anaconda.com/miniconda/Miniconda3-latest-MacOSX-x86_64.sh -o ./build/miniconda_installer.sh
     - curl https://github.com/sofroniewn/napari/raw/pyinstaller/bundle/logo.icns -L -o icon.icns
-    - python3 ./bundle_osx.py napari --pip-install git+https://github.com/napari/napari.git --icon ./icon.icns -y
+    - python3 ./bundle_osx.py napari --pip-install git+https://github.com/napari/napari.git --icon ./icon.icns -y --log-level INFO
   napari_artifacts:
     path: dist/napari.dmg
     type: application/octet-stream
