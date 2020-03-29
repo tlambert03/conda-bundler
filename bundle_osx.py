@@ -399,7 +399,7 @@ def make_dmg(app_path: str, keep_app: bool = False) -> str:
     if not path.exists(path.join(dmg_dir, "Applications")):
         symlink("/Applications", path.join(dmg_dir, "Applications"))
     if keep_app:
-        shutil.copytree(app_path, dmg_dir)
+        shutil.copytree(app_path, path.join(dmg_dir, path.basename(app_path)))
     else:
         shutil.move(app_path, dmg_dir)
     logging.info("Creating DMG archive...")
