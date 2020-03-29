@@ -83,7 +83,7 @@ python bundle_osx.py napari --pip-install git+https://github.com/napari/napari.g
 Bundle together multiple pip installable apps into a custom app package:
 
 ```shell
-python bundle_osx.py napari --pip-install numpy scipy matplotlib
+python bundle_osx.py myapp --pip-install numpy scipy matplotlib
 ```
 
 > ⚠️ TODO: there still needs to be a main "entry point" script... so this particular
