@@ -5,10 +5,10 @@ import glob
 import logging
 import shutil
 import stat
+import subprocess
 import sys
 from datetime import datetime
-from os import chmod, environ, lstat, makedirs, path, remove, symlink, listdir
-from subprocess import run
+from os import chmod, environ, listdir, lstat, makedirs, path, remove, symlink
 from time import time
 from typing import List
 from urllib.request import urlretrieve
@@ -55,7 +55,7 @@ def install_conda(buildpath: str) -> str:
         miniconda_installer = path.join(buildpath, "miniconda_installer.sh")
         if not path.exists(miniconda_installer):
             urlretrieve(MINICONDA_URL, filename=miniconda_installer)
-        run(["bash", f"{miniconda_installer}", "-b", "-p", f'"{conda_dir}"'])
+        subprocess.run(["bash", f"{miniconda_installer}", "-b", "-p", f'"{conda_dir}"'])
     else:
         logging.info(f"Using existing miniconda installation at {conda_dir}")
     return conda_dir
@@ -85,7 +85,7 @@ def conda_run(args: List[str], env_name: str = "base"):
         env_pkgs = glob.glob(env_dir + "/lib/python*/site-packages")
         env["PYTHONPATH"] = ":".join(env_pkgs)
     logging.debug(f"ENV_RUN: {' '.join(args)}")
-    run(args, env=env)
+    subprocess.run(args, env=env)
 
 
 def create_env(
@@ -380,7 +380,7 @@ def create_exe(app_path: str, pyscript: str = ""):
     chmod(exe_path, current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
 
 
-def make_dmg(app_path: str, keep_app: bool = False):
+def make_dmg(app_path: str, keep_app: bool = False) -> str:
     """Bundle app at ``app_path`` into a .dmg file for distribution.
 
     Will also include a symlink to ``/Applications``.
@@ -403,15 +403,31 @@ def make_dmg(app_path: str, keep_app: bool = False):
     else:
         shutil.move(app_path, dmg_dir)
     logging.info("Creating DMG archive...")
-    result = run(
+    result = subprocess.run(
         ["hdiutil", "create", f"{dmg_file}", "-srcfolder", f"{dmg_dir}"],
         capture_output=True,
     )
     if result.returncode == 0:
         logging.info("DMG successfully created")
         shutil.rmtree(dmg_dir)
+        return dmg_file
     else:
         logging.error(f"DMG creation failed: {result.stderr.decode().strip()}")
+        return ""
+
+
+def sign_app(target: str, cert_name: str = "-"):
+    try:
+        if cert_name != "-":
+            cert_name = f'"{cert_name}"'
+        else:
+            logging.info(f"No code certificate supplied, using ad-hoc signature")
+        subprocess.check_call(
+            ["codesign", "--force", "--deep", "-s", cert_name, target]
+        )
+        logging.info(f"Successfully signed {target}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"App code signing failed: {e}")
 
 
 def main(
@@ -425,6 +441,7 @@ def main(
     conda_exclude: List[str] = [],
     icon: str = "",
     nodmg: bool = False,
+    cert_name: str = "-",
 ):
     """Main program to bundle a conda env into a mac app.
 
@@ -457,6 +474,10 @@ def main(
     nodmg : bool, optional
         Whether to skip putting the new app into a dmg file, by default a dmg WILL be
         created at ``distpath/name.dmg``
+    cert_name : str, optional
+        If provided, will be used to code-sign the app bundle using the (common) name of
+        a certificate that must be in the keychain.  By default, ad-hoc code signing is
+        used.
     """
     logging.info(f'Creating "{name}.app"')
     start_t = time()
@@ -479,10 +500,14 @@ def main(
     create_info_plist(app_path, name, icon_basename)
     # create dist/appname.app/Contents/MacOS/appname script
     create_exe(app_path)
+    if cert_name:
+        sign_app(app_path, cert_name)
 
     # bundle into a dmg
     if not nodmg:
-        make_dmg(app_path)
+        dmg_file = make_dmg(app_path)
+        if dmg_file and cert_name:
+            sign_app(dmg_file, cert_name)
 
     logging.info(f"App created in {int(time() - start_t)} seconds")
 
@@ -579,6 +604,16 @@ if __name__ == "__main__":
         metavar="",
         nargs="*",
         default=["bin/*-qt4*"],
+    )
+    parser.add_argument(
+        "--cert-name",
+        help=(
+            "Optional name of certificate in keychain with which to sign app.\n"
+            "By default, uses ad-hoc code signing"
+        ),
+        type=str,
+        metavar="",
+        default="-",
     )
     parser.add_argument(
         "--log-level",
