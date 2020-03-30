@@ -80,6 +80,12 @@ default branch of a git repository:
 python bundle_osx.py napari --pip-install git+https://github.com/napari/napari.git
 ```
 
+Bundle an app then run a quick program or test prior to code signing and DMG formation
+
+```shell
+python bundle_osx.py napari --test "napari --info"
+```
+
 Bundle together multiple pip installable apps into a custom app package:
 
 ```shell
@@ -108,24 +114,30 @@ optional arguments:
   -h, --help            show this help message and exit
   -y, --noconfirm       Replace existing app and resources without asking
                         for confirmation
-  -i , --icon           Icon file (in .icns format) for the bundle.
-  --distpath            Where to put the bundled app (default: ./dist)
-  --buildpath           Where to put build resources (default: ./build)
-  --py                  Python version to bundle. (default 3.8)
-  --nodmg               Do not package app into .dmg file.  By default a
+  -d, --nodmg           Do not package app into .dmg file.  By default a
                         DMG will be created
-  --pip-install         Install these pip packages. Multiple arguments
+  -i PATH, --icon PATH  Icon file (in .icns format) for the bundle.
+  --distpath PATH       Where to put the bundled app (default: ./dist)
+  --buildpath PATH      Where to put build resources (default: ./build)
+  --py VERSION          Python version to bundle. (default 3.8)
+  --pip-install [ ]     Install these pip packages. Multiple arguments
                         accepted as would be passed to pip install. If not
                         provided, will attempt to `pip install <app_name>`
                         using `app_name` argument. If '--pip-install' IS
                         provided, then 'app_name' will NOT be installed
                         unless explicitly included in this list.
-  --conda-include       directories in conda environment to include when
+  --conda-include [ ]   directories in conda environment to include when
                         bundling
-  --conda-exclude       glob patterns (from base conda environment) to exclude
-                        when bundling
-  --log-level           Amount of detail in build-time console messages.
+  --conda-exclude [ ]   glob patterns (from base conda environment) to
+                        exclude when bundling
+  --cert-name KEY       Optional name of certificate in keychain with which
+                        to sign app. By default, uses ad-hoc code signing.
+                        Pass "" to skip signing altogether.
+  --test [ [ ...]]      Optional test commands to run after app bundling,
+                        but before code signing and dmg formation.
+  --log-level LEVEL     Amount of detail in build-time console messages.
                         may be one of TRACE, DEBUG, INFO, WARN, ERROR,
                         CRITICAL (default: WARN)
-  --clean               Delete all folders created by this bundler and exit.
+  --clean               Delete all folders created by this bundler, then exit.
+  --make-dmg APP_PATH   Bundle prebuilt .app into a DMG, then exit.
 ```

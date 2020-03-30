@@ -573,6 +573,12 @@ if __name__ == "__main__":
         action="store_true",
     )
     parser.add_argument(
+        "-d",
+        "--nodmg",
+        help="Do not package app into .dmg file.  By default a DMG will be created",
+        action="store_true",
+    )
+    parser.add_argument(
         "name",
         help=(
             "Name of app to bundle. If '--pip-install' is not specified,\n"
@@ -584,32 +590,27 @@ if __name__ == "__main__":
         "-i",
         "--icon",
         help=("Icon file (in .icns format) for the bundle."),
-        metavar="",
+        metavar="PATH",
         type=argparse.FileType("r"),
     )
     parser.add_argument(
         "--distpath",
         help="Where to put the bundled app (default: ./dist)",
-        metavar="",
+        metavar="PATH",
         default="./dist",
     )
     parser.add_argument(
         "--buildpath",
         help="Where to put build resources (default: ./build)",
-        metavar="",
+        metavar="PATH",
         default="./build",
     )
     parser.add_argument(
         "--py",
         help="Python version to bundle. (default 3.8)",
-        metavar="",
+        metavar="VERSION",
         default="3.8",
         choices=["2.7", "3.6", "3.7", "3.8"],
-    )
-    parser.add_argument(
-        "--nodmg",
-        help="Do not package app into .dmg file.  By default a DMG will be created",
-        action="store_true",
     )
     parser.add_argument(
         "--pip-install",
@@ -644,13 +645,13 @@ if __name__ == "__main__":
             "Optional name of certificate in keychain with which to sign app.\n"
             "By default, uses ad-hoc code signing"
         ),
-        metavar="",
+        metavar="KEY",
         default="-",
     )
     parser.add_argument(
         "--test",
         help=(
-            "optional test commands to run after app bundling,\n"
+            "Optional test commands to run after app bundling,\n"
             "but before code signing and dmg formation"
         ),
         metavar="",
@@ -665,13 +666,13 @@ if __name__ == "__main__":
             "ERROR, CRITICAL\n(default: INFO)"
         ),
         type=str,
-        metavar="",
+        metavar="LEVEL",
         default="INFO",
         choices=["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"],
     )
     parser.add_argument(
         "--clean",
-        help="Delete all folders created by this bundler and exit.",
+        help="Delete all folders created by this bundler, then exit.",
         nargs=0,
         action=CleanAction,
     )
@@ -679,6 +680,7 @@ if __name__ == "__main__":
         "--make-dmg",
         help="Bundle prebuilt .app into a DMG, then exit.",
         action=MakeDMG,
+        metavar="APP_PATH",
         nargs=1,
     )
 
