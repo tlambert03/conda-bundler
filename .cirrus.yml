@@ -19,3 +19,6 @@ bundle_task:
 
 # most recent artifact available at:
 # https://api.cirrus-ci.com/v1/artifact/github/tlambert03/napari-bundler/napari/dist/napari.dmg
+
+# or a specific job:
+# https://api.cirrus-ci.com/v1/artifact/task/<TASK ID>/napari/dist/napari.dmg

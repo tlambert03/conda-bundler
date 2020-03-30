@@ -604,7 +604,7 @@ if __name__ == "__main__":
         help="Python version to bundle. (default 3.8)",
         metavar="",
         default="3.8",
-        choices=["3.6", "3.7", "3.8"],
+        choices=["2.7", "3.6", "3.7", "3.8"],
     )
     parser.add_argument(
         "--nodmg",
