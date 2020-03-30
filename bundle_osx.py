@@ -120,12 +120,14 @@ def create_env(
         The path to the newly created environment folder at ``conda/envs/app_name``
     """
     env_dir = path.join(conda_base, "envs", app_name)
+    _existing = False
     if (
         path.exists(env_dir)
         and confirm
-        and not get_confirmation("Environment already exists, overwrite?")
+        and not get_confirmation(f"Environment {env_dir} already exists, overwrite?")
     ):
         logging.info(f"Using existing conda environment: {env_dir}")
+        _existing = True
     else:
         if path.exists(env_dir):
             logging.info(f"Deleting existing conda environment: {env_dir}")
@@ -150,7 +152,10 @@ def create_env(
     logging.info("Installing packages with pip")
     # ignore-installed is important otherwise deps that are in the base environment
     # may not make it into the bundle
-    conda_run(["pip", "install", "--ignore-installed"] + pip_install, app_name)
+    if _existing:
+        conda_run(["pip", "install"] + pip_install, app_name)
+    else:
+        conda_run(["pip", "install", "--ignore-installed"] + pip_install, app_name)
 
     # # here is how you would install using conda
     # logging.info("Installing packages with conda")
@@ -335,7 +340,7 @@ def create_info_plist(
         f.write(template)
 
 
-def create_exe(app_path: str, pyscript: str = ""):
+def create_exe(app_path: str, pyscript: str = "") -> str:
     """Create runnable script in bundle.app/Contents/MacOS.
 
     This will create an executable bash script at ``app_path/Contents/MacOS/app_name``.
@@ -353,7 +358,12 @@ def create_exe(app_path: str, pyscript: str = ""):
         ``Resources/bin/{app_name}``.  (Assuming the package being installed has a
         ``console_scripts`` entry point in its setup.py file, setuptools will have
         created an executable script in the environment's ``/bin`` folder.)
+
+    executable : str
+        path to executable script
     """
+    logging.info(f"Creating executable script.")
+
     app_name = path.basename(app_path).strip(".app")
     exe_path = path.join(app_path, "Contents", "MacOS", app_name)
     if not pyscript:
@@ -378,6 +388,7 @@ def create_exe(app_path: str, pyscript: str = ""):
     # Set execution flags
     current_permissions = stat.S_IMODE(lstat(exe_path).st_mode)
     chmod(exe_path, current_permissions | stat.S_IXUSR | stat.S_IXGRP | stat.S_IXOTH)
+    return exe_path
 
 
 def make_dmg(app_path: str, keep_app: bool = False) -> str:
@@ -395,13 +406,19 @@ def make_dmg(app_path: str, keep_app: bool = False) -> str:
     """
     dmg_dir = path.join(path.dirname(app_path), "dmg")
     dmg_file = app_path.replace(".app", ".dmg")
+    app_in_dmg = path.join(dmg_dir, path.basename(app_path))
+    if path.exists(app_in_dmg):
+        shutil.rmtree(app_in_dmg)
+    if path.exists(dmg_file):
+        remove(dmg_file)
+
     makedirs(dmg_dir, exist_ok=True)
     if not path.exists(path.join(dmg_dir, "Applications")):
         symlink("/Applications", path.join(dmg_dir, "Applications"))
     if keep_app:
-        shutil.copytree(app_path, path.join(dmg_dir, path.basename(app_path)))
+        shutil.copytree(app_path, app_in_dmg)
     else:
-        shutil.move(app_path, dmg_dir)
+        shutil.move(app_path, app_in_dmg)
     logging.info("Creating DMG archive...")
     result = subprocess.run(
         ["hdiutil", "create", f"{dmg_file}", "-srcfolder", f"{dmg_dir}"],
@@ -417,6 +434,7 @@ def make_dmg(app_path: str, keep_app: bool = False) -> str:
 
 
 def sign_app(target: str, cert_name: str = "-"):
+    logging.info("Signing code...")
     try:
         if cert_name == "-":
             logging.info(f"No code certificate supplied, using ad-hoc signature")
@@ -439,6 +457,7 @@ def main(
     conda_include: List[str] = [],
     conda_exclude: List[str] = [],
     icon: str = "",
+    test: List[str] = [],
     nodmg: bool = False,
     cert_name: str = "-",
 ):
@@ -470,6 +489,10 @@ def main(
         by default []
     icon : str, optional
         Path to an .icns file to use for this app.  By default, no icon will be used.
+    test : list of str, optional
+        Optional test commands to run after app bundling, but before code signing and
+        DMG creation.  Any commands that start with ``name`` will execute the script
+        created at ``distpath/name.app/Contents/MacOS/name``
     nodmg : bool, optional
         Whether to skip putting the new app into a dmg file, by default a dmg WILL be
         created at ``distpath/name.dmg``
@@ -498,7 +521,20 @@ def main(
     # create Info.plist in dist/appname.app/Contents
     create_info_plist(app_path, name, icon_basename)
     # create dist/appname.app/Contents/MacOS/appname script
-    create_exe(app_path)
+    exe_path = create_exe(app_path)
+
+    # execute tests, if present
+    if test:
+        for c in test:
+            command = c.strip().split()
+            if not command:
+                continue
+            if command[0].startswith(name):
+                command[0] = exe_path
+            logging.info("Running test: {}".format(" ".join(command)))
+            subprocess.check_call(command)
+
+    # code signing
     if cert_name:
         sign_app(app_path, cert_name)
 
@@ -524,7 +560,7 @@ if __name__ == "__main__":
     class MakeDMG(argparse.Action):
         def __call__(self, parser, args, values, option_string=None):
             logging.basicConfig(level=args.log_level)
-            make_dmg(values[0], keep_app=True)
+            make_dmg(values[0], keep_app=False)
             sys.exit()
 
     parser = argparse.ArgumentParser(formatter_class=argparse.RawTextHelpFormatter)
@@ -541,7 +577,6 @@ if __name__ == "__main__":
             "Name of app to bundle. If '--pip-install' is not specified,\n"
             "this name is also assumed to be a pip-installable package."
         ),
-        type=str,
         metavar="app_name",
     )
     parser.add_argument(
@@ -554,21 +589,18 @@ if __name__ == "__main__":
     parser.add_argument(
         "--distpath",
         help="Where to put the bundled app (default: ./dist)",
-        type=str,
         metavar="",
         default="./dist",
     )
     parser.add_argument(
         "--buildpath",
         help="Where to put build resources (default: ./build)",
-        type=str,
         metavar="",
         default="./build",
     )
     parser.add_argument(
         "--py",
         help="Python version to bundle. (default 3.8)",
-        type=str,
         metavar="",
         default="3.8",
         choices=["3.6", "3.7", "3.8"],
@@ -594,7 +626,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--conda-include",
         help="directories in conda environment to include when bundling",
-        type=str,
         metavar="",
         nargs="*",
         default=[],
@@ -602,7 +633,6 @@ if __name__ == "__main__":
     parser.add_argument(
         "--conda-exclude",
         help="glob patterns (from base conda environment) to exclude when bundling",
-        type=str,
         metavar="",
         nargs="*",
         default=["bin/*-qt4*"],
@@ -613,20 +643,29 @@ if __name__ == "__main__":
             "Optional name of certificate in keychain with which to sign app.\n"
             "By default, uses ad-hoc code signing"
         ),
-        type=str,
         metavar="",
         default="-",
+    )
+    parser.add_argument(
+        "--test",
+        help=(
+            "optional test commands to run after app bundling,\n"
+            "but before code signing and dmg formation"
+        ),
+        metavar="",
+        nargs="*",
+        default=[],
     )
     parser.add_argument(
         "--log-level",
         help=(
             "Amount of detail in build-time console messages."
-            "\nmay be one of TRACE, DEBUG, INFO, WARN,"
-            "ERROR, CRITICAL\n(default: WARN)"
+            "\nmay be one of TRACE, DEBUG, INFO, WARN, "
+            "ERROR, CRITICAL\n(default: INFO)"
         ),
         type=str,
         metavar="",
-        default="WARN",
+        default="INFO",
         choices=["TRACE", "DEBUG", "INFO", "WARN", "ERROR", "CRITICAL"],
     )
     parser.add_argument(
@@ -639,8 +678,7 @@ if __name__ == "__main__":
         "--make-dmg",
         help="Bundle prebuilt .app into a DMG, then exit.",
         action=MakeDMG,
-        type=str,
-        nargs=1
+        nargs=1,
     )
 
     args = parser.parse_args()
