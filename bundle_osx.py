@@ -434,11 +434,12 @@ def make_dmg(app_path: str, keep_app: bool = False) -> str:
 
 
 def sign_app(target: str, cert_name: str = "-"):
-    logging.info("Signing code...")
     try:
-        if cert_name == "-":
-            logging.info(f"No code certificate supplied, using ad-hoc signature")
         if cert_name:
+            if cert_name == "-":
+                logging.info(f"No code certificate supplied, using ad-hoc signature")
+            else:
+                logging.info(f"Signing code with cert_name: {cert_name}")
             subprocess.check_call(
                 ["codesign", "--force", "--deep", "-s", cert_name, target]
             )
